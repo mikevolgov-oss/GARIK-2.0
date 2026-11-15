@@ -1,0 +1,4 @@
+<resources>
+    <string name="app_name">GARIK</string>
+    <string name="accessibility_service_description">После нажатия кнопки в GARIK ищет в ChatGPT доступную голосовую кнопку и нажимает её. Не выполняет другие действия.</string>
+</resources>
