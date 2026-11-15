@@ -13,6 +13,7 @@ import android.webkit.WebChromeClient;
 import android.webkit.JavascriptInterface;
 import android.os.Build;
 import java.util.Collections;
+import java.util.Locale;
 import java.net.HttpURLConnection;
 import java.net.URL;
 import java.io.BufferedReader;
@@ -127,7 +128,7 @@ public class MainActivity extends Activity {
         }
         @JavascriptInterface public void openBluetooth() {
             runOnUiThread(() -> {
-                try { if (Build.VERSION.SDK_INT >= 29) startActivity(new Intent(Settings.Panel.ACTION_BLUETOOTH)); else startActivity(new Intent(Settings.ACTION_BLUETOOTH_SETTINGS)); }
+                try { startActivity(new Intent(Settings.ACTION_BLUETOOTH_SETTINGS)); }
                 catch (Exception e) { startActivity(new Intent(Settings.ACTION_BLUETOOTH_SETTINGS)); }
             });
         }
