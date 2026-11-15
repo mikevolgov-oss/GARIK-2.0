@@ -13,6 +13,11 @@ import android.webkit.WebChromeClient;
 import android.webkit.JavascriptInterface;
 import android.os.Build;
 import java.util.Collections;
+import java.net.HttpURLConnection;
+import java.net.URL;
+import java.io.BufferedReader;
+import java.io.InputStreamReader;
+import org.json.JSONObject;
 
 public class MainActivity extends Activity {
     private WebView web;
@@ -54,6 +59,35 @@ public class MainActivity extends Activity {
     }
 
     public class Bridge {
+        @JavascriptInterface public void loadWeather() {
+            new Thread(() -> {
+                HttpURLConnection connection = null;
+                try {
+                    URL url = new URL("https://api.open-meteo.com/v1/forecast?latitude=57.212&longitude=41.930&current=temperature_2m,apparent_temperature,weather_code,wind_speed_10m&daily=temperature_2m_max,temperature_2m_min&forecast_days=3&timezone=Europe%2FMoscow");
+                    connection = (HttpURLConnection) url.openConnection();
+                    connection.setRequestMethod("GET");
+                    connection.setConnectTimeout(12000);
+                    connection.setReadTimeout(12000);
+                    connection.setRequestProperty("Accept", "application/json");
+                    StringBuilder body = new StringBuilder();
+                    try (BufferedReader reader = new BufferedReader(new InputStreamReader(connection.getInputStream(), "UTF-8"))) {
+                        String line;
+                        while ((line = reader.readLine()) != null) body.append(line);
+                    }
+                    final String json = body.toString();
+                    runOnUiThread(() -> {
+                        if (web != null) web.evaluateJavascript("renderWeather(" + JSONObject.quote(json) + ")", null);
+                    });
+                } catch (Exception error) {
+                    runOnUiThread(() -> {
+                        if (web != null) web.evaluateJavascript("renderWeatherError()", null);
+                    });
+                } finally {
+                    if (connection != null) connection.disconnect();
+                }
+            }).start();
+        }
+
         @JavascriptInterface public void openChatGPT() {
             runOnUiThread(() -> {
                 getSharedPreferences("garik", MODE_PRIVATE).edit()
