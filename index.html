@@ -51,7 +51,8 @@ footer{text-align:center;color:#60758d;font-size:11px;padding:24px 0}
 </main>
 <nav><button class="active" data-open="home">⌂ Главная</button><button data-open="tools">🧰 Инструменты</button><button data-open="notes">✎ Заметки</button><button data-open="settings">⚙️ Настройки</button></nav>
 <script>
-const $=id=>document.getElementById(id);\nconst themeSelect=$('themeSelect');function applyTheme(theme){const safe=theme==='light'?'light':'dark';document.body.dataset.theme=safe;if(themeSelect)themeSelect.value=safe;try{localStorage.setItem('garik-theme',safe)}catch(e){}}let savedTheme='dark';try{savedTheme=localStorage.getItem('garik-theme')||'dark'}catch(e){}applyTheme(savedTheme);if(themeSelect)themeSelect.addEventListener('change',()=>applyTheme(themeSelect.value));
+const $=id=>document.getElementById(id);
+const themeSelect=$('themeSelect');function applyTheme(theme){const safe=theme==='light'?'light':'dark';document.body.dataset.theme=safe;if(themeSelect)themeSelect.value=safe;try{localStorage.setItem('garik-theme',safe)}catch(e){}}let savedTheme='dark';try{savedTheme=localStorage.getItem('garik-theme')||'dark'}catch(e){}applyTheme(savedTheme);if(themeSelect)themeSelect.addEventListener('change',()=>applyTheme(themeSelect.value));
 function show(id){document.querySelectorAll('.view').forEach(v=>v.classList.toggle('active',v.id===id));document.querySelectorAll('nav button').forEach(b=>b.classList.toggle('active',b.dataset.open===id));window.scrollTo(0,0)}
 document.querySelectorAll('[data-open]').forEach(b=>b.addEventListener('click',()=>show(b.dataset.open)));
 function tick(){const d=new Date();$('clock').textContent=d.toLocaleTimeString('ru-RU',{hour:'2-digit',minute:'2-digit'});$('date').textContent=d.toLocaleDateString('ru-RU',{weekday:'short',day:'numeric',month:'long'})}tick();setInterval(tick,1000);
