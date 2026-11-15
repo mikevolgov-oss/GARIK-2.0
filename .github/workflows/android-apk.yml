@@ -26,6 +26,9 @@ jobs:
           mkdir -p "$HOME/.android"
           base64 --decode signing/debug.keystore.base64 > "$HOME/.android/debug.keystore"
           chmod 600 "$HOME/.android/debug.keystore"
+      - name: Verify stable signing certificate
+        run: |
+          keytool -list -v -keystore "$HOME/.android/debug.keystore" -storepass android -alias androiddebugkey | grep -F "95:76:09:6B:38:24:8F:84:7D:69:31:2E:42:90:C2:78:6B:D5:50:9E:74:E7:B4:49:7B:CB:77:87:3D:0C:6D:21"
       - name: Build debug APK
         run: gradle assembleDebug
       - name: Upload APK
