@@ -1,0 +1,43 @@
+name: Проверка резервной копии
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  validate-backup:
+    name: Проверить основные файлы
+    runs-on: ubuntu-latest
+    steps:
+      - name: Получить файлы репозитория
+        uses: actions/checkout@v4
+
+      - name: Проверить наличие и содержимое документов
+        shell: bash
+        run: |
+          set -euo pipefail
+          files=(
+            "README.md"
+            "INSTRUCTIONS.md"
+            "PROFILE.md"
+            "CAR.md"
+            "DEVICE.md"
+            "BACKUP_WORKFLOW.md"
+            "CHANGELOG.md"
+          )
+
+          for file in "${files[@]}"; do
+            if [[ ! -s "$file" ]]; then
+              echo "::error file=$file::Файл отсутствует или пустой"
+              exit 1
+            fi
+            echo "OK: $file"
+          done
+
+          echo "Проверка резервной копии завершена успешно."
