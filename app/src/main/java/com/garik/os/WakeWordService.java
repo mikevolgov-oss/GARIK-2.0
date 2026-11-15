@@ -243,6 +243,7 @@ public class WakeWordService extends Service implements RecognitionListener {
 
                 triggered = false;
                 try {
+                    if (recognizer != null) recognizer.reset();
                     speechService.startListening(this);
                     updateNotification("Снова слушаю фразу «Гарик, не спи»", true);
                 } catch (Exception e) {
