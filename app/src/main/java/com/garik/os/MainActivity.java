@@ -12,7 +12,7 @@ import android.webkit.WebViewClient;
 import android.webkit.WebChromeClient;
 import android.webkit.JavascriptInterface;
 import android.os.Build;
-import java.util.Collections;
+import android.content.pm.PackageManager;
 import java.util.Locale;
 import java.net.HttpURLConnection;
 import java.net.URL;
@@ -22,7 +22,9 @@ import org.json.JSONObject;
 
 public class MainActivity extends Activity {
     private static final int REQUEST_COMMAND = 7102;
+    private static final int REQUEST_WAKE_MIC = 7103;
     private WebView web;
+
     @Override public void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
         getWindow().setStatusBarColor(android.graphics.Color.rgb(8,19,33));
@@ -30,12 +32,29 @@ public class MainActivity extends Activity {
         web = new WebView(this);
         web.getSettings().setJavaScriptEnabled(true);
         web.getSettings().setDomStorageEnabled(true);
-        web.setWebViewClient(new WebViewClient());
+        web.setWebViewClient(new WebViewClient() {
+            @Override public void onPageFinished(WebView view, String url) {
+                super.onPageFinished(view, url);
+                if (getIntent() != null && getIntent().getBooleanExtra("launch_chat", false)) {
+                    getIntent().removeExtra("launch_chat");
+                    view.evaluateJavascript("openAssistant()", null);
+                }
+            }
+        });
         web.setWebChromeClient(new WebChromeClient());
         web.addJavascriptInterface(new Bridge(), "Android");
         setContentView(web);
         web.loadUrl("file:///android_asset/index.html");
         requestHomeShortcut();
+    }
+
+    @Override protected void onNewIntent(Intent intent) {
+        super.onNewIntent(intent);
+        setIntent(intent);
+        if (web != null && intent.getBooleanExtra("launch_chat", false)) {
+            intent.removeExtra("launch_chat");
+            web.postDelayed(() -> web.evaluateJavascript("openAssistant()", null), 300);
+        }
     }
 
     private void requestHomeShortcut() {
@@ -44,7 +63,7 @@ public class MainActivity extends Activity {
             ShortcutManager manager = getSystemService(ShortcutManager.class);
             if (manager == null || !manager.isRequestPinShortcutSupported()) return;
             boolean alreadyPinned = false;
-            for (android.content.pm.ShortcutInfo item : manager.getPinnedShortcuts()) {
+            for (ShortcutInfo item : manager.getPinnedShortcuts()) {
                 if ("garik_home".equals(item.getId())) { alreadyPinned = true; break; }
             }
             if (alreadyPinned) return;
@@ -91,19 +110,7 @@ public class MainActivity extends Activity {
         }
 
         @JavascriptInterface public void openChatGPT() {
-            runOnUiThread(() -> {
-                getSharedPreferences("garik", MODE_PRIVATE).edit()
-                    .putBoolean("voice_pending", true).putInt("voice_attempts", 0).apply();
-                Intent launch = getPackageManager().getLaunchIntentForPackage("com.openai.chatgpt");
-                if (launch != null) {
-                    launch.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
-                    startActivity(launch);
-                } else {
-                    try { startActivity(new Intent(Intent.ACTION_VIEW,
-                        android.net.Uri.parse("https://play.google.com/store/apps/details?id=com.openai.chatgpt"))); }
-                    catch (Exception ignored) {}
-                }
-            });
+            runOnUiThread(() -> launchChatGPT());
         }
 
         @JavascriptInterface public void startCommandRecognition() {
@@ -167,6 +174,53 @@ public class MainActivity extends Activity {
         }
         @JavascriptInterface public void openAccessibilitySettings() {
             runOnUiThread(() -> startActivity(new Intent(Settings.ACTION_ACCESSIBILITY_SETTINGS)));
+        }
+        @JavascriptInterface public void startWakeWord() {
+            runOnUiThread(() -> {
+                if (checkSelfPermission(android.Manifest.permission.RECORD_AUDIO) != PackageManager.PERMISSION_GRANTED) {
+                    requestPermissions(new String[]{android.Manifest.permission.RECORD_AUDIO}, REQUEST_WAKE_MIC);
+                } else startWakeWordService();
+            });
+        }
+        @JavascriptInterface public void stopWakeWord() {
+            stopService(new Intent(MainActivity.this, WakeWordService.class));
+            if (web != null) web.evaluateJavascript("wakeWordResult(false,'Режим пробуждения выключен')", null);
+        }
+        @JavascriptInterface public boolean isWakeWordActive() { return WakeWordService.isRunning(); }
+    }
+
+    private void startWakeWordService() {
+        try {
+            Intent service = new Intent(this, WakeWordService.class);
+            if (Build.VERSION.SDK_INT >= 26) startForegroundService(service); else startService(service);
+            if (web != null) web.evaluateJavascript("wakeWordResult(true,'Запускаю распознавание. При первом запуске загружу модель около 45 МБ.')", null);
+        } catch (Exception e) {
+            if (web != null) web.evaluateJavascript("wakeWordResult(false,'Не удалось запустить микрофон. Проверь разрешения Android.')", null);
+        }
+    }
+
+    private void launchChatGPT() {
+        getSharedPreferences("garik", MODE_PRIVATE).edit()
+            .putBoolean("voice_pending", true).putInt("voice_attempts", 0).apply();
+        Intent launch = getPackageManager().getLaunchIntentForPackage("com.openai.chatgpt");
+        if (launch != null) {
+            launch.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
+            startActivity(launch);
+        } else {
+            try { startActivity(new Intent(Intent.ACTION_VIEW,
+                android.net.Uri.parse("https://play.google.com/store/apps/details?id=com.openai.chatgpt"))); }
+            catch (Exception ignored) {}
+        }
+    }
+
+    @Override public void onRequestPermissionsResult(int requestCode, String[] permissions, int[] grantResults) {
+        super.onRequestPermissionsResult(requestCode, permissions, grantResults);
+        if (requestCode == REQUEST_WAKE_MIC) {
+            if (grantResults.length > 0 && grantResults[0] == PackageManager.PERMISSION_GRANTED) {
+                startWakeWordService();
+            } else if (web != null) {
+                web.evaluateJavascript("wakeWordResult(false,'Без разрешения на микрофон фраза пробуждения не работает.')", null);
+            }
         }
     }
 
