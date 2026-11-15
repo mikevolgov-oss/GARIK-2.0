@@ -131,6 +131,24 @@ public class MainActivity extends Activity {
                 catch (Exception e) { startActivity(new Intent(Settings.ACTION_BLUETOOTH_SETTINGS)); }
             });
         }
+
+        @JavascriptInterface public void openApp(String name) {
+            runOnUiThread(() -> {
+                String wanted = name == null ? "" : name.toLowerCase(new Locale("ru"));
+                Intent query = new Intent(Intent.ACTION_MAIN, null);
+                query.addCategory(Intent.CATEGORY_LAUNCHER);
+                java.util.List<android.content.pm.ResolveInfo> apps = getPackageManager().queryIntentActivities(query, 0);
+                for (android.content.pm.ResolveInfo app : apps) {
+                    String label = app.loadLabel(getPackageManager()).toString().toLowerCase(new Locale("ru"));
+                    if (label.equals(wanted) || label.contains(wanted) || wanted.contains(label)) {
+                        Intent launch = getPackageManager().getLaunchIntentForPackage(app.activityInfo.packageName);
+                        if (launch != null) { startActivity(launch); return; }
+                    }
+                }
+                if (web != null) web.evaluateJavascript("commandResult(" + JSONObject.quote("Не нашёл приложение: " + name) + ")", null);
+            });
+        }
+
         @JavascriptInterface public void volume(String direction) {
             android.media.AudioManager a = (android.media.AudioManager)getSystemService(AUDIO_SERVICE);
             if (a != null) a.adjustStreamVolume(android.media.AudioManager.STREAM_MUSIC,
