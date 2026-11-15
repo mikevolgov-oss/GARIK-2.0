@@ -187,7 +187,7 @@ public class WakeWordService extends Service implements RecognitionListener {
 
     @Override
     public void onError(Exception error) {
-        if (stopping) return;
+        if (stopping || restartPending) return;
         updateNotification(
             "Распознавание остановилось. Открой GARIK OS и включи режим снова.", true);
         running = false;
