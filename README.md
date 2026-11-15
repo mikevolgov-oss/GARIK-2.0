@@ -9,6 +9,7 @@
 - [CAR.md](CAR.md) — сведения об автомобиле и уже выполненных работах.
 - [DEVICE.md](DEVICE.md) — сведения об основном телефоне и настройках.
 - [ANDROID/](ANDROID/) — Android-мастерская: Honor X6B, MacroDroid и проверенные эксперименты.
+- [PASSAT/](PASSAT/) — цифровая сервисная книжка Passat B5 1.8 ADR: диагностика, ремонты и подбор запчастей.
 - [BACKUP_WORKFLOW.md](BACKUP_WORKFLOW.md) — как обновлять резервную копию.
 - [CHANGELOG.md](CHANGELOG.md) — история изменений.
 
