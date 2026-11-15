@@ -4,10 +4,10 @@ android {
     namespace 'com.garik.os'
     compileSdk 35
     defaultConfig {
-        applicationId 'com.garik.os.v3'
+        applicationId 'com.garik.os.v4'
         minSdk 23
         targetSdk 35
-        versionCode 6
+        versionCode 7
         versionName '2.1.2'
     }
     signingConfigs {
