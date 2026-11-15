@@ -1,4 +1,5 @@
 name: Build GARIK OS 2.1.2 APK
+# Pipeline builds the root Vosk project and verifies its ARM64 native library.
 
 on:
   push:
