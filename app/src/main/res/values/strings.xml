@@ -1,1 +1,4 @@
-<resources><string name="app_name">GARIK OS</string><string name="voice_service_description">Помогает открыть голосовой режим ChatGPT после нажатия кнопки в GARIK OS.</string></resources>
+<resources>
+    <string name="app_name">GARIK OS</string>
+    <string name="voice_service_description">Помогает открыть голосовой режим ChatGPT после нажатия кнопки в GARIK OS.</string>
+</resources>
