@@ -21,13 +21,17 @@ jobs:
         uses: gradle/actions/setup-gradle@v4
         with:
           gradle-version: '8.9'
-      - name: Restore stable debug signing key
+      - name: Restore and verify stable signing key
         run: |
-          mkdir -p "$HOME/.android"
-          base64 --decode signing/debug.keystore.base64 > "$HOME/.android/debug.keystore"
-          chmod 600 "$HOME/.android/debug.keystore"
+          mkdir -p signing
+          base64 --decode signing/debug.keystore.base64 > signing/debug.keystore
+          chmod 600 signing/debug.keystore
+          keytool -list -v -keystore signing/debug.keystore -storepass android -alias androiddebugkey | grep -E 'SHA256:'
       - name: Build debug APK
         run: gradle assembleDebug
+      - name: Verify APK signing certificate
+        run: |
+          apksigner verify --print-certs app/build/outputs/apk/debug/app-debug.apk
       - name: Upload APK
         uses: actions/upload-artifact@v4
         with:
