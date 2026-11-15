@@ -20,6 +20,7 @@ import java.io.InputStreamReader;
 import org.json.JSONObject;
 
 public class MainActivity extends Activity {
+    private static final int REQUEST_COMMAND = 7102;
     private WebView web;
     @Override public void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
@@ -103,6 +104,40 @@ public class MainActivity extends Activity {
                 }
             });
         }
+
+        @JavascriptInterface public void startCommandRecognition() {
+            runOnUiThread(() -> {
+                try {
+                    Intent i = new Intent(android.speech.RecognizerIntent.ACTION_RECOGNIZE_SPEECH);
+                    i.putExtra(android.speech.RecognizerIntent.EXTRA_LANGUAGE_MODEL, android.speech.RecognizerIntent.LANGUAGE_MODEL_FREE_FORM);
+                    i.putExtra(android.speech.RecognizerIntent.EXTRA_LANGUAGE, "ru-RU");
+                    i.putExtra(android.speech.RecognizerIntent.EXTRA_PROMPT, "Скажите команду для Гарика");
+                    i.putExtra(android.speech.RecognizerIntent.EXTRA_MAX_RESULTS, 1);
+                    startActivityForResult(i, REQUEST_COMMAND);
+                } catch (Exception e) {
+                    if (web != null) web.evaluateJavascript("commandResult('Голосовой ввод недоступен')", null);
+                }
+            });
+        }
+        @JavascriptInterface public void openWifi() {
+            runOnUiThread(() -> {
+                try { if (Build.VERSION.SDK_INT >= 29) startActivity(new Intent(Settings.Panel.ACTION_WIFI)); else startActivity(new Intent(Settings.ACTION_WIFI_SETTINGS)); }
+                catch (Exception e) { startActivity(new Intent(Settings.ACTION_WIFI_SETTINGS)); }
+            });
+        }
+        @JavascriptInterface public void openBluetooth() {
+            runOnUiThread(() -> {
+                try { if (Build.VERSION.SDK_INT >= 29) startActivity(new Intent(Settings.Panel.ACTION_BLUETOOTH)); else startActivity(new Intent(Settings.ACTION_BLUETOOTH_SETTINGS)); }
+                catch (Exception e) { startActivity(new Intent(Settings.ACTION_BLUETOOTH_SETTINGS)); }
+            });
+        }
+        @JavascriptInterface public void volume(String direction) {
+            android.media.AudioManager a = (android.media.AudioManager)getSystemService(AUDIO_SERVICE);
+            if (a != null) a.adjustStreamVolume(android.media.AudioManager.STREAM_MUSIC,
+                "up".equals(direction) ? android.media.AudioManager.ADJUST_RAISE : android.media.AudioManager.ADJUST_LOWER,
+                android.media.AudioManager.FLAG_SHOW_UI);
+        }
+
         @JavascriptInterface public boolean isVoiceServiceEnabled() {
             try {
                 String enabled = Settings.Secure.getString(getContentResolver(), Settings.Secure.ENABLED_ACCESSIBILITY_SERVICES);
@@ -115,6 +150,18 @@ public class MainActivity extends Activity {
             runOnUiThread(() -> startActivity(new Intent(Settings.ACTION_ACCESSIBILITY_SETTINGS)));
         }
     }
+
+    @Override protected void onActivityResult(int requestCode, int resultCode, Intent data) {
+        super.onActivityResult(requestCode, resultCode, data);
+        if (requestCode == REQUEST_COMMAND && web != null) {
+            if (resultCode == RESULT_OK && data != null) {
+                java.util.ArrayList<String> a = data.getStringArrayListExtra(android.speech.RecognizerIntent.EXTRA_RESULTS);
+                String phrase = a != null && !a.isEmpty() ? a.get(0) : "";
+                web.evaluateJavascript("onGarikCommand(" + JSONObject.quote(phrase) + ")", null);
+            } else web.evaluateJavascript("commandResult('Не расслышал. Попробуй ещё раз.')", null);
+        }
+    }
+
     @Override public void onBackPressed() {
         if (web != null && web.canGoBack()) web.goBack(); else super.onBackPressed();
     }
