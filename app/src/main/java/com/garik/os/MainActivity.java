@@ -22,7 +22,8 @@ import org.json.JSONObject;
 
 public class MainActivity extends Activity {
     private static final int REQUEST_COMMAND = 7102;
-    private static final int REQUEST_WAKE_MIC = 7103;\n    private static final int REQUEST_WAKE_NOTIFICATIONS = 7104;
+    private static final int REQUEST_WAKE_MIC = 7103;
+    private static final int REQUEST_WAKE_NOTIFICATIONS = 7104;
     private WebView web;
 
     @Override public void onCreate(Bundle savedInstanceState) {
