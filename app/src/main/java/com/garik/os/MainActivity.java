@@ -69,6 +69,14 @@ public class MainActivity extends Activity {
                 }
             });
         }
+        @JavascriptInterface public boolean isVoiceServiceEnabled() {
+            try {
+                String enabled = Settings.Secure.getString(getContentResolver(), Settings.Secure.ENABLED_ACCESSIBILITY_SERVICES);
+                if (enabled == null) return false;
+                String component = new android.content.ComponentName(MainActivity.this, VoiceAssistService.class).flattenToString();
+                return enabled.toLowerCase(java.util.Locale.ROOT).contains(component.toLowerCase(java.util.Locale.ROOT));
+            } catch (Exception ignored) { return false; }
+        }
         @JavascriptInterface public void openAccessibilitySettings() {
             runOnUiThread(() -> startActivity(new Intent(Settings.ACTION_ACCESSIBILITY_SETTINGS)));
         }
