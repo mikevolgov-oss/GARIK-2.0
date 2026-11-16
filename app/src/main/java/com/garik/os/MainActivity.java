@@ -146,16 +146,39 @@ public class MainActivity extends Activity {
             });
         }
 
+        @JavascriptInterface public void toggleWakeWord() {
+            runOnUiThread(() -> {
+                try {
+                    if (WakeWordService.isRunning()) {
+                        stopService(new Intent(MainActivity.this, WakeWordService.class));
+                        if (web != null) web.evaluateJavascript("wakeWordResult(false,'Режим пробуждения выключен')", null);
+                        return;
+                    }
+                    if (Build.VERSION.SDK_INT >= 23 &&
+                            checkSelfPermission(android.Manifest.permission.RECORD_AUDIO) != PackageManager.PERMISSION_GRANTED) {
+                        requestPermissions(new String[]{android.Manifest.permission.RECORD_AUDIO}, REQUEST_WAKE_MIC);
+                    } else {
+                        requestWakeNotificationPermission();
+                    }
+                } catch (Throwable error) {
+                    Log.e("GARIK_WAKE", "toggleWakeWord failed", error);
+                    showWakeError(error);
+                }
+            });
+        }
         @JavascriptInterface public void startWakeWord() {
             runOnUiThread(() -> {
-                if (checkSelfPermission(android.Manifest.permission.RECORD_AUDIO) != PackageManager.PERMISSION_GRANTED) {
+                if (Build.VERSION.SDK_INT >= 23 &&
+                        checkSelfPermission(android.Manifest.permission.RECORD_AUDIO) != PackageManager.PERMISSION_GRANTED) {
                     requestPermissions(new String[]{android.Manifest.permission.RECORD_AUDIO}, REQUEST_WAKE_MIC);
                 } else requestWakeNotificationPermission();
             });
         }
         @JavascriptInterface public void stopWakeWord() {
-            stopService(new Intent(MainActivity.this, WakeWordService.class));
-            if (web != null) web.evaluateJavascript("wakeWordResult(false,'Режим пробуждения выключен')", null);
+            runOnUiThread(() -> {
+                stopService(new Intent(MainActivity.this, WakeWordService.class));
+                if (web != null) web.evaluateJavascript("wakeWordResult(false,'Режим пробуждения выключен')", null);
+            });
         }
         @JavascriptInterface public boolean isWakeWordActive() { return WakeWordService.isRunning(); }
     }
@@ -177,10 +200,19 @@ public class MainActivity extends Activity {
         try {
             Intent service = new Intent(this, WakeWordService.class);
             if (Build.VERSION.SDK_INT >= 26) startForegroundService(service); else startService(service);
-            if (web != null) web.evaluateJavascript("wakeWordResult(true,'Включаю распознавание. Модель сохраняется на телефоне и повторно не скачивается.')", null);
-        } catch (Exception e) {
-            if (web != null) web.evaluateJavascript("wakeWordResult(false,'Не удалось запустить микрофон. Проверь разрешения Android.')", null);
+            Log.i("GARIK_WAKE", "WakeWordService start request sent");
+            if (web != null) web.evaluateJavascript("wakeWordResult(true,'Запрос отправлен. Запускаю микрофон и распознавание…')", null);
+        } catch (Throwable error) {
+            Log.e("GARIK_WAKE", "Unable to start WakeWordService", error);
+            showWakeError(error);
         }
+    }
+
+    private void showWakeError(Throwable error) {
+        String detail = error == null ? "Неизвестная ошибка" :
+            error.getClass().getSimpleName() + (error.getMessage() == null ? "" : ": " + error.getMessage());
+        if (web != null) web.evaluateJavascript(
+            "wakeWordResult(false," + JSONObject.quote("Не удалось включить пробуждение: " + detail) + ")", null);
     }
 
     private void launchChatGPT() {
