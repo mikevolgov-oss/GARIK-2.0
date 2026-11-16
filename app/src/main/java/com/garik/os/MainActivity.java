@@ -11,6 +11,7 @@ import android.webkit.WebView;
 import android.webkit.WebViewClient;
 import android.webkit.WebChromeClient;
 import android.webkit.JavascriptInterface;
+import android.util.Log;
 import android.os.Build;
 import android.content.pm.PackageManager;
 import java.util.Locale;
@@ -83,30 +84,46 @@ public class MainActivity extends Activity {
     public class Bridge {
         @JavascriptInterface public void loadWeather() {
             new Thread(() -> {
-                HttpURLConnection connection = null;
-                try {
-                    URL url = new URL("https://api.open-meteo.com/v1/forecast?latitude=57.212&longitude=41.930&current=temperature_2m,apparent_temperature,weather_code,wind_speed_10m&daily=temperature_2m_max,temperature_2m_min&forecast_days=3&timezone=Europe%2FMoscow");
-                    connection = (HttpURLConnection) url.openConnection();
-                    connection.setRequestMethod("GET");
-                    connection.setConnectTimeout(12000);
-                    connection.setReadTimeout(12000);
-                    connection.setRequestProperty("Accept", "application/json");
-                    StringBuilder body = new StringBuilder();
-                    try (BufferedReader reader = new BufferedReader(new InputStreamReader(connection.getInputStream(), "UTF-8"))) {
-                        String line;
-                        while ((line = reader.readLine()) != null) body.append(line);
+                String failure = "Неизвестная ошибка";
+                for (int attempt = 1; attempt <= 2; attempt++) {
+                    HttpURLConnection connection = null;
+                    try {
+                        URL url = new URL("https://api.open-meteo.com/v1/forecast?latitude=57.212&longitude=41.930&current=temperature_2m,apparent_temperature,weather_code,wind_speed_10m&daily=temperature_2m_max,temperature_2m_min&forecast_days=3&timezone=Europe%2FMoscow");
+                        connection = (HttpURLConnection) url.openConnection();
+                        connection.setRequestMethod("GET");
+                        connection.setConnectTimeout(20000);
+                        connection.setReadTimeout(20000);
+                        connection.setInstanceFollowRedirects(true);
+                        connection.setRequestProperty("Accept", "application/json");
+                        connection.setRequestProperty("User-Agent", "GARIK-OS/2.1");
+                        int status = connection.getResponseCode();
+                        if (status < 200 || status >= 300) {
+                            throw new java.io.IOException("HTTP " + status);
+                        }
+                        StringBuilder body = new StringBuilder();
+                        try (BufferedReader reader = new BufferedReader(new InputStreamReader(connection.getInputStream(), "UTF-8"))) {
+                            String line;
+                            while ((line = reader.readLine()) != null) body.append(line);
+                        }
+                        final String json = body.toString();
+                        runOnUiThread(() -> {
+                            if (web != null) web.evaluateJavascript("renderWeather(" + JSONObject.quote(json) + ")", null);
+                        });
+                        return;
+                    } catch (Exception error) {
+                        failure = error.getClass().getSimpleName() + ": " + String.valueOf(error.getMessage());
+                        Log.e("GARIK_WEATHER", "Weather request attempt " + attempt + " failed: " + failure, error);
+                        if (attempt < 2) {
+                            try { Thread.sleep(1000); } catch (InterruptedException ignored) { Thread.currentThread().interrupt(); }
+                        }
+                    } finally {
+                        if (connection != null) connection.disconnect();
                     }
-                    final String json = body.toString();
-                    runOnUiThread(() -> {
-                        if (web != null) web.evaluateJavascript("renderWeather(" + JSONObject.quote(json) + ")", null);
-                    });
-                } catch (Exception error) {
-                    runOnUiThread(() -> {
-                        if (web != null) web.evaluateJavascript("renderWeatherError()", null);
-                    });
-                } finally {
-                    if (connection != null) connection.disconnect();
                 }
+                final String message = failure;
+                runOnUiThread(() -> {
+                    if (web != null) web.evaluateJavascript("renderWeatherError(" + JSONObject.quote(message) + ")", null);
+                });
             }).start();
         }
 
@@ -207,7 +224,7 @@ public class MainActivity extends Activity {
         try {
             Intent service = new Intent(this, WakeWordService.class);
             if (Build.VERSION.SDK_INT >= 26) startForegroundService(service); else startService(service);
-            if (web != null) web.evaluateJavascript("wakeWordResult(true,'Запускаю распознавание. При первом запуске загружу модель около 45 МБ.')", null);
+            if (web != null) web.evaluateJavascript("wakeWordResult(true,'Включаю распознавание. Модель сохраняется на телефоне и повторно не скачивается.')", null);
         } catch (Exception e) {
             if (web != null) web.evaluateJavascript("wakeWordResult(false,'Не удалось запустить микрофон. Проверь разрешения Android.')", null);
         }
