@@ -12,6 +12,10 @@ import android.os.Handler;
 import android.os.Looper;
 import android.os.IBinder;
 import android.os.PowerManager;
+import android.util.Log;
+import android.content.BroadcastReceiver;
+import android.content.Context;
+import android.content.IntentFilter;
 import org.json.JSONObject;
 import org.vosk.Model;
 import org.vosk.Recognizer;
@@ -29,6 +33,7 @@ import java.util.zip.ZipEntry;
 import java.util.zip.ZipInputStream;
 
 public class WakeWordService extends Service implements RecognitionListener {
+    private static final String TAG = "GARIK_WAKE";
     private static final String CHANNEL = "garik_wake_word";
     private static final int NOTIFICATION_ID = 2201;
     private static final String MODEL_URL = "https://alphacephei.com/vosk/models/vosk-model-small-ru-0.22.zip";
@@ -42,6 +47,24 @@ public class WakeWordService extends Service implements RecognitionListener {
     private SpeechService speechService;
     private PowerManager.WakeLock wakeLock;
     private Thread setupThread;
+    private final BroadcastReceiver screenReceiver = new BroadcastReceiver() {
+        @Override public void onReceive(Context context, Intent intent) {
+            String action = intent == null ? "unknown" : intent.getAction();
+            logState("SCREEN_EVENT " + action, null);
+        }
+    };
+
+    private void logState(String event, Throwable error) {
+        PowerManager pm = (PowerManager) getSystemService(POWER_SERVICE);
+        boolean interactive = pm != null && pm.isInteractive();
+        boolean held = wakeLock != null && wakeLock.isHeld();
+        String state = event + " running=" + running
+            + " stopping=" + stopping + " restartPending=" + restartPending
+            + " interactive=" + interactive + " wakeLockHeld=" + held
+            + " setupThread=" + (setupThread == null ? "null" : setupThread.getState());
+        if (error == null) Log.i(TAG, state);
+        else Log.e(TAG, state, error);
+    }
 
     private void resetStopState() { stopping = false; restartPending = false; triggered = false; }
     public static boolean isRunning() { return running; }
@@ -52,13 +75,25 @@ public class WakeWordService extends Service implements RecognitionListener {
         PowerManager pm = (PowerManager) getSystemService(POWER_SERVICE);
         wakeLock = pm.newWakeLock(PowerManager.PARTIAL_WAKE_LOCK, "GARIK:WakeWord");
         wakeLock.acquire();
+        IntentFilter screenFilter = new IntentFilter();
+        screenFilter.addAction(Intent.ACTION_SCREEN_OFF);
+        screenFilter.addAction(Intent.ACTION_SCREEN_ON);
+        if (Build.VERSION.SDK_INT >= 33) {
+            registerReceiver(screenReceiver, screenFilter, Context.RECEIVER_NOT_EXPORTED);
+        } else {
+            registerReceiver(screenReceiver, screenFilter);
+        }
+        logState("onCreate", null);
     }
 
     @Override public int onStartCommand(Intent intent, int flags, int startId) {
+        logState("onStartCommand action=" + (intent == null ? "null" : intent.getAction())
+            + " startId=" + startId + " flags=" + flags, null);
         if (intent != null && "STOP".equals(intent.getAction())) {
             stopping = true;
             running = false;
             handler.removeCallbacksAndMessages(null);
+            logState("STOP requested", null);
             stopSelf();
             return START_NOT_STICKY;
         }
@@ -73,9 +108,11 @@ public class WakeWordService extends Service implements RecognitionListener {
             running = true;
             if (setupThread == null) {
                 setupThread = new Thread(this::prepareRecognizer, "GarikVoskSetup");
+                logState("starting setup thread", null);
                 setupThread.start();
             }
         } catch (Exception e) {
+            logState("onStartCommand failed", e);
             running = false;
             stopSelf();
         }
@@ -83,6 +120,7 @@ public class WakeWordService extends Service implements RecognitionListener {
     }
 
     private void prepareRecognizer() {
+        logState("prepareRecognizer begin", null);
         try {
             File modelDir = new File(getFilesDir(), "vosk-model-small-ru-0.22");
             File marker = new File(modelDir, "conf/model.conf");
@@ -99,7 +137,9 @@ public class WakeWordService extends Service implements RecognitionListener {
             speechService = new SpeechService(recognizer, 16000.0f);
             updateNotification("Слушаю фразу «Гарик, не спи»", true);
             speechService.startListening(this);
+            logState("Vosk startListening returned", null);
         } catch (Exception e) {
+            logState("prepareRecognizer failed", e);
             updateNotification("Ошибка запуска: " + e.getMessage(), false);
             running = false;
             stopSelf();
@@ -145,11 +185,24 @@ public class WakeWordService extends Service implements RecognitionListener {
         }
     }
 
-    @Override public void onResult(String hypothesis) { inspect(hypothesis, "text"); }
-    @Override public void onFinalResult(String hypothesis) { inspect(hypothesis, "text"); }
-    @Override public void onPartialResult(String hypothesis) { inspect(hypothesis, "partial"); }
-    @Override public void onTimeout() { scheduleRecognitionRestart(500); }
+    @Override public void onResult(String hypothesis) {
+        Log.d(TAG, "onResult " + hypothesis);
+        inspect(hypothesis, "text");
+    }
+    @Override public void onFinalResult(String hypothesis) {
+        Log.d(TAG, "onFinalResult " + hypothesis);
+        inspect(hypothesis, "text");
+    }
+    @Override public void onPartialResult(String hypothesis) {
+        Log.v(TAG, "onPartialResult " + hypothesis);
+        inspect(hypothesis, "partial");
+    }
+    @Override public void onTimeout() {
+        logState("Vosk onTimeout", null);
+        scheduleRecognitionRestart(500);
+    }
     @Override public void onError(Exception e) {
+        logState("Vosk onError", e);
         if (stopping || restartPending) return;
         updateNotification("Ошибка микрофона. Проверь разрешение и перезапусти режим.", false);
         running = false;
@@ -157,6 +210,7 @@ public class WakeWordService extends Service implements RecognitionListener {
     }
 
     private void scheduleRecognitionRestart(long delayMs) {
+        logState("scheduleRecognitionRestart delayMs=" + delayMs, null);
         handler.post(() -> {
             if (stopping || !running || speechService == null || restartPending) return;
 
@@ -175,11 +229,13 @@ public class WakeWordService extends Service implements RecognitionListener {
                     if (recognizer != null) recognizer.reset();
                     triggered = false;
                     speechService.startListening(this);
+                    logState("Vosk restart startListening returned", null);
                     updateNotification(
                         "Снова слушаю. Нажми «Открыть Гарика», чтобы перейти в голосовой ChatGPT.",
                         true
                     );
                 } catch (Exception e) {
+                    logState("Vosk restart failed", e);
                     updateNotification("Не удалось продолжить прослушивание. Открой GARIK OS и включи режим снова.", false);
                     running = false;
                     stopSelf();
@@ -197,6 +253,7 @@ public class WakeWordService extends Service implements RecognitionListener {
             phrase = phrase.replaceAll("[^а-яa-z ]", " ").replaceAll("\\s+", " ").trim();
             if (phrase.contains("гарик не спи") || phrase.contains("гарик неспи")) {
                 triggered = true;
+                logState("WAKE_WORD_MATCH phrase=" + phrase, null);
                 getSharedPreferences("garik", MODE_PRIVATE).edit()
                     .putBoolean("voice_pending", true).putInt("voice_attempts", 0).apply();
                 updateNotification(
@@ -250,6 +307,7 @@ public class WakeWordService extends Service implements RecognitionListener {
     }
 
     @Override public void onDestroy() {
+        logState("onDestroy begin", null);
         stopping = true;
         running = false;
         handler.removeCallbacksAndMessages(null);
@@ -260,6 +318,9 @@ public class WakeWordService extends Service implements RecognitionListener {
         if (recognizer != null) { try { recognizer.close(); } catch (Exception ignored) { } recognizer = null; }
         if (model != null) { try { model.close(); } catch (Exception ignored) { } model = null; }
         if (wakeLock != null && wakeLock.isHeld()) wakeLock.release();
+        try { unregisterReceiver(screenReceiver); }
+        catch (Exception e) { Log.w(TAG, "screen receiver unregister failed", e); }
+        logState("onDestroy complete", null);
         super.onDestroy();
     }
 
