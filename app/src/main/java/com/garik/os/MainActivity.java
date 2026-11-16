@@ -46,14 +46,21 @@ public class MainActivity extends Activity {
         setContentView(web);
         web.loadUrl("file:///android_asset/index.html");
         requestHomeShortcut();
+
+        // Launch ChatGPT immediately after the notification tap.
+        // Do not wait for WebView page load and JavaScript bridge startup.
+        if (getIntent() != null && getIntent().getBooleanExtra("launch_chat", false)) {
+            getIntent().removeExtra("launch_chat");
+            launchChatGPT();
+        }
     }
 
     @Override protected void onNewIntent(Intent intent) {
         super.onNewIntent(intent);
         setIntent(intent);
-        if (web != null && intent.getBooleanExtra("launch_chat", false)) {
+        if (intent.getBooleanExtra("launch_chat", false)) {
             intent.removeExtra("launch_chat");
-            web.postDelayed(() -> web.evaluateJavascript("openAssistant()", null), 300);
+            launchChatGPT();
         }
     }
 
