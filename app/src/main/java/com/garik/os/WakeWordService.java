@@ -8,6 +8,8 @@ import android.app.Service;
 import android.content.Intent;
 import android.content.pm.ServiceInfo;
 import android.os.Build;
+import android.os.Handler;
+import android.os.Looper;
 import android.os.IBinder;
 import android.os.PowerManager;
 import org.json.JSONObject;
@@ -32,12 +34,16 @@ public class WakeWordService extends Service implements RecognitionListener {
     private static final String MODEL_URL = "https://alphacephei.com/vosk/models/vosk-model-small-ru-0.22.zip";
     private static volatile boolean running = false;
     private volatile boolean triggered = false;
+    private volatile boolean stopping = false;
+    private volatile boolean restartPending = false;
+    private final Handler handler = new Handler(Looper.getMainLooper());
     private Model model;
     private Recognizer recognizer;
     private SpeechService speechService;
     private PowerManager.WakeLock wakeLock;
     private Thread setupThread;
 
+    private void resetStopState() { stopping = false; restartPending = false; triggered = false; }
     public static boolean isRunning() { return running; }
 
     @Override public void onCreate() {
@@ -50,9 +56,13 @@ public class WakeWordService extends Service implements RecognitionListener {
 
     @Override public int onStartCommand(Intent intent, int flags, int startId) {
         if (intent != null && "STOP".equals(intent.getAction())) {
+            stopping = true;
+            running = false;
+            handler.removeCallbacksAndMessages(null);
             stopSelf();
             return START_NOT_STICKY;
         }
+        resetStopState();
         try {
             Notification n = buildNotification("Загружаю распознавание речи…", false);
             if (Build.VERSION.SDK_INT >= 29) {
@@ -138,11 +148,46 @@ public class WakeWordService extends Service implements RecognitionListener {
     @Override public void onResult(String hypothesis) { inspect(hypothesis, "text"); }
     @Override public void onFinalResult(String hypothesis) { inspect(hypothesis, "text"); }
     @Override public void onPartialResult(String hypothesis) { inspect(hypothesis, "partial"); }
-    @Override public void onTimeout() { }
+    @Override public void onTimeout() { scheduleRecognitionRestart(500); }
     @Override public void onError(Exception e) {
+        if (stopping || restartPending) return;
         updateNotification("Ошибка микрофона. Проверь разрешение и перезапусти режим.", false);
         running = false;
         stopSelf();
+    }
+
+    private void scheduleRecognitionRestart(long delayMs) {
+        handler.post(() -> {
+            if (stopping || !running || speechService == null || restartPending) return;
+
+            restartPending = true;
+            try {
+                speechService.cancel();
+            } catch (Exception ignored) { }
+
+            handler.postDelayed(() -> {
+                if (stopping || !running || speechService == null) {
+                    restartPending = false;
+                    return;
+                }
+
+                try {
+                    if (recognizer != null) recognizer.reset();
+                    triggered = false;
+                    speechService.startListening(this);
+                    updateNotification(
+                        "Снова слушаю. Нажми «Открыть Гарика», чтобы перейти в голосовой ChatGPT.",
+                        true
+                    );
+                } catch (Exception e) {
+                    updateNotification("Не удалось продолжить прослушивание. Открой GARIK OS и включи режим снова.", false);
+                    running = false;
+                    stopSelf();
+                } finally {
+                    restartPending = false;
+                }
+            }, delayMs);
+        });
     }
 
     private void inspect(String json, String key) {
@@ -154,17 +199,11 @@ public class WakeWordService extends Service implements RecognitionListener {
                 triggered = true;
                 getSharedPreferences("garik", MODE_PRIVATE).edit()
                     .putBoolean("voice_pending", true).putInt("voice_attempts", 0).apply();
-                try {
-                    Intent chat = getPackageManager().getLaunchIntentForPackage("com.openai.chatgpt");
-                    if (chat == null) throw new IllegalStateException("ChatGPT не установлен");
-                    chat.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK | Intent.FLAG_ACTIVITY_SINGLE_TOP);
-                    startActivity(chat);
-                    stopSelf();
-                } catch (Exception blocked) {
-                    updateNotification("Фраза услышана. Нажми, чтобы открыть Гарика.", false);
-                    stopForegroundCompat();
-                    stopSelf();
-                }
+                updateNotification(
+                    "Услышал! Нажми «Открыть Гарика», чтобы перейти в голосовой ChatGPT.",
+                    true
+                );
+                scheduleRecognitionRestart(1800);
             }
         } catch (Exception ignored) { }
     }
@@ -187,6 +226,7 @@ public class WakeWordService extends Service implements RecognitionListener {
             .setContentIntent(content)
             .setOngoing(listening)
             .setAutoCancel(!listening)
+            .addAction(android.R.drawable.ic_btn_speak_now, "Открыть Гарика", content)
             .addAction(android.R.drawable.ic_media_pause, "Выключить", stopPending);
         return b.build();
     }
@@ -210,7 +250,9 @@ public class WakeWordService extends Service implements RecognitionListener {
     }
 
     @Override public void onDestroy() {
+        stopping = true;
         running = false;
+        handler.removeCallbacksAndMessages(null);
         if (speechService != null) {
             try { speechService.cancel(); speechService.shutdown(); } catch (Exception ignored) { }
             speechService = null;

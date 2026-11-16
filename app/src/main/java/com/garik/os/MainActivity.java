@@ -23,6 +23,7 @@ import org.json.JSONObject;
 public class MainActivity extends Activity {
     private static final int REQUEST_COMMAND = 7102;
     private static final int REQUEST_WAKE_MIC = 7103;
+    private static final int REQUEST_WAKE_NOTIFICATIONS = 7104;
     private WebView web;
 
     @Override public void onCreate(Bundle savedInstanceState) {
@@ -179,7 +180,7 @@ public class MainActivity extends Activity {
             runOnUiThread(() -> {
                 if (checkSelfPermission(android.Manifest.permission.RECORD_AUDIO) != PackageManager.PERMISSION_GRANTED) {
                     requestPermissions(new String[]{android.Manifest.permission.RECORD_AUDIO}, REQUEST_WAKE_MIC);
-                } else startWakeWordService();
+                } else requestWakeNotificationPermission();
             });
         }
         @JavascriptInterface public void stopWakeWord() {
@@ -187,6 +188,19 @@ public class MainActivity extends Activity {
             if (web != null) web.evaluateJavascript("wakeWordResult(false,'Режим пробуждения выключен')", null);
         }
         @JavascriptInterface public boolean isWakeWordActive() { return WakeWordService.isRunning(); }
+    }
+
+    private void requestWakeNotificationPermission() {
+        if (Build.VERSION.SDK_INT >= 33 &&
+                checkSelfPermission(android.Manifest.permission.POST_NOTIFICATIONS)
+                        != PackageManager.PERMISSION_GRANTED) {
+            requestPermissions(
+                new String[]{android.Manifest.permission.POST_NOTIFICATIONS},
+                REQUEST_WAKE_NOTIFICATIONS
+            );
+        } else {
+            startWakeWordService();
+        }
     }
 
     private void startWakeWordService() {
@@ -213,13 +227,30 @@ public class MainActivity extends Activity {
         }
     }
 
-    @Override public void onRequestPermissionsResult(int requestCode, String[] permissions, int[] grantResults) {
+    @Override
+    public void onRequestPermissionsResult(int requestCode, String[] permissions, int[] grantResults) {
         super.onRequestPermissionsResult(requestCode, permissions, grantResults);
+
         if (requestCode == REQUEST_WAKE_MIC) {
-            if (grantResults.length > 0 && grantResults[0] == PackageManager.PERMISSION_GRANTED) {
+            if (grantResults.length > 0 &&
+                    grantResults[0] == PackageManager.PERMISSION_GRANTED) {
+                requestWakeNotificationPermission();
+            } else if (web != null) {
+                web.evaluateJavascript(
+                    "wakeWordResult(false,'Без разрешения на микрофон фраза пробуждения не работает.')",
+                    null
+                );
+            }
+        } else if (requestCode == REQUEST_WAKE_NOTIFICATIONS) {
+            if (Build.VERSION.SDK_INT < 33 ||
+                    (grantResults.length > 0 &&
+                    grantResults[0] == PackageManager.PERMISSION_GRANTED)) {
                 startWakeWordService();
             } else if (web != null) {
-                web.evaluateJavascript("wakeWordResult(false,'Без разрешения на микрофон фраза пробуждения не работает.')", null);
+                web.evaluateJavascript(
+                    "wakeWordResult(false,'Разреши уведомления, чтобы GARIK OS мог работать в фоне.')",
+                    null
+                );
             }
         }
     }
