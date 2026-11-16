@@ -38,8 +38,21 @@ jobs:
           yes | sdkmanager --licenses
           sdkmanager "platforms;android-35" "build-tools;35.0.0"
 
+      - name: Restore and verify stable signing key
+        run: |
+          test -s signing/debug.keystore.base64
+          mkdir -p signing
+          base64 --decode signing/debug.keystore.base64 > signing/debug.keystore
+          chmod 600 signing/debug.keystore
+          keytool -list -v -keystore signing/debug.keystore -storepass android -alias androiddebugkey | grep -E 'SHA256:'
+
       - name: Build debug APK
         run: gradle --no-daemon assembleDebug
+
+      - name: Verify APK signing certificate
+        run: |
+          apksigner verify --verbose app/build/outputs/apk/debug/app-debug.apk
+          apksigner verify --print-certs app/build/outputs/apk/debug/app-debug.apk | grep -E 'Signer #1 certificate SHA-256 digest'
 
       - name: Upload APK
         uses: actions/upload-artifact@v4
@@ -47,3 +60,4 @@ jobs:
           name: GARIK-OS-debug
           path: app/build/outputs/apk/debug/*.apk
           if-no-files-found: error
+          retention-days: 14
