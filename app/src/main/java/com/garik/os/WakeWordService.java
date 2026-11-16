@@ -124,14 +124,22 @@ public class WakeWordService extends Service implements RecognitionListener {
         try {
             File modelDir = new File(getFilesDir(), "vosk-model-small-ru-0.22");
             File marker = new File(modelDir, "conf/model.conf");
-            if (!marker.isFile()) {
-                updateNotification("Скачиваю русскую модель, примерно 45 МБ…", false);
-                File zip = new File(getFilesDir(), "vosk-ru.zip");
+            if (marker.isFile()) {
+                logState("MODEL_CACHE_HIT: модель уже сохранена, повторное скачивание не требуется", null);
+                updateNotification("Русская модель уже загружена. Запускаю распознавание…", false);
+            } else {
+                logState("MODEL_CACHE_MISS: модель отсутствует или повреждена, начинаю загрузку", null);
+                deleteRecursively(modelDir);
+                File zip = new File(getFilesDir(), "vosk-ru.zip.part");
+                if (zip.exists() && !zip.delete()) {
+                    throw new IllegalStateException("Не удалось удалить незавершённый архив модели");
+                }
                 downloadModel(zip);
                 unzipModel(zip, getFilesDir());
-                zip.delete();
+                if (!marker.isFile()) throw new IllegalStateException("Файл модели не найден после распаковки");
+                if (!zip.delete()) Log.w(TAG, "Не удалось удалить временный архив модели");
+                logState("MODEL_DOWNLOAD_COMPLETE: модель распакована и сохранена для следующих запусков", null);
             }
-            if (!marker.isFile()) throw new IllegalStateException("Файл модели не найден после распаковки");
             model = new Model(modelDir.getAbsolutePath());
             recognizer = new Recognizer(model, 16000.0f);
             speechService = new SpeechService(recognizer, 16000.0f);
@@ -151,14 +159,61 @@ public class WakeWordService extends Service implements RecognitionListener {
         c.setConnectTimeout(20000);
         c.setReadTimeout(60000);
         c.setRequestProperty("User-Agent", "GARIK-OS/2.1");
-        try (InputStream in = new BufferedInputStream(c.getInputStream());
-             FileOutputStream out = new FileOutputStream(target)) {
-            byte[] buffer = new byte[65536];
-            int count;
-            while ((count = in.read(buffer)) != -1) out.write(buffer, 0, count);
+        try {
+            int total = c.getContentLength();
+            try (InputStream in = new BufferedInputStream(c.getInputStream());
+                 FileOutputStream out = new FileOutputStream(target)) {
+                byte[] buffer = new byte[65536];
+                int count;
+                long downloaded = 0;
+                int lastPercent = -1;
+                while ((count = in.read(buffer)) != -1) {
+                    out.write(buffer, 0, count);
+                    downloaded += count;
+                    if (total > 0) {
+                        int percent = (int) Math.min(100, downloaded * 100 / total);
+                        if (percent != lastPercent) {
+                            lastPercent = percent;
+                            updateDownloadProgress(downloaded, total, percent);
+                        }
+                    } else if (downloaded % (1024 * 1024) < buffer.length) {
+                        updateNotification("Скачано " + formatMb(downloaded) + " МБ русской модели…", false);
+                    }
+                }
+                out.getFD().sync();
+            }
+            if (total > 0 && target.length() != total) {
+                throw new IllegalStateException("Архив модели скачан не полностью: " + target.length() + " из " + total + " байт");
+            }
         } finally {
             c.disconnect();
         }
+    }
+
+    private void updateDownloadProgress(long downloaded, long total, int percent) {
+        Notification.Builder b = createNotificationBuilder();
+        b.setSmallIcon(android.R.drawable.ic_btn_speak_now)
+            .setContentTitle("GARIK OS · загрузка модели")
+            .setContentText("Русская модель: " + formatMb(downloaded) + " из " + formatMb(total) + " МБ")
+            .setOngoing(true)
+            .setProgress(100, percent, false);
+        ((NotificationManager) getSystemService(NOTIFICATION_SERVICE)).notify(NOTIFICATION_ID, b.build());
+    }
+
+    private String formatMb(long bytes) {
+        return String.format(Locale.US, "%.1f", bytes / 1048576.0);
+    }
+
+    private Notification.Builder createNotificationBuilder() {
+        return Build.VERSION.SDK_INT >= 26
+            ? new Notification.Builder(this, CHANNEL) : new Notification.Builder(this);
+    }
+
+    private void deleteRecursively(File file) {
+        if (file == null || !file.exists()) return;
+        File[] children = file.listFiles();
+        if (children != null) for (File child : children) deleteRecursively(child);
+        if (!file.delete()) Log.w(TAG, "Не удалось удалить " + file.getAbsolutePath());
     }
 
     private void unzipModel(File zipFile, File destination) throws Exception {
@@ -275,8 +330,7 @@ public class WakeWordService extends Service implements RecognitionListener {
         stop.setAction("STOP");
         PendingIntent stopPending = PendingIntent.getService(this, 2203, stop,
             PendingIntent.FLAG_UPDATE_CURRENT | (Build.VERSION.SDK_INT >= 23 ? PendingIntent.FLAG_IMMUTABLE : 0));
-        Notification.Builder b = Build.VERSION.SDK_INT >= 26
-            ? new Notification.Builder(this, CHANNEL) : new Notification.Builder(this);
+        Notification.Builder b = createNotificationBuilder();
         b.setSmallIcon(android.R.drawable.ic_btn_speak_now)
             .setContentTitle("GARIK OS · пробуждение")
             .setContentText(message)
