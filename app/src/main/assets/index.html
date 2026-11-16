@@ -32,7 +32,7 @@ document.addEventListener('visibilitychange',()=>{if(!document.hidden){refreshVo
 function panel(id){document.querySelectorAll('.panel').forEach(p=>p.classList.toggle('open',p.id===id&&!p.classList.contains('open')))}
 const wx={0:'Ясно',1:'Преимущественно ясно',2:'Переменная облачность',3:'Пасмурно',45:'Туман',51:'Морось',61:'Небольшой дождь',63:'Дождь',65:'Сильный дождь',71:'Небольшой снег',73:'Снег',75:'Сильный снег',80:'Ливневый дождь',95:'Гроза'};
 function renderWeather(raw){try{let j=JSON.parse(raw),c=j.current;document.getElementById('temp').textContent=Math.round(c.temperature_2m)+'°';document.getElementById('condition').innerHTML=(wx[c.weather_code]||'Погодные условия')+'<br>Ощущается '+Math.round(c.apparent_temperature)+'°<br>Ветер '+Math.round(c.wind_speed_10m)+' км/ч';let n=['Сегодня','Завтра','Послезавтра'];document.getElementById('forecast').innerHTML=n.map((x,i)=>'<div class="day">'+x+'<b>'+Math.round(j.daily.temperature_2m_max[i])+'° / '+Math.round(j.daily.temperature_2m_min[i])+'°</b></div>').join('');document.getElementById('updated').textContent='Обновлено сейчас'}catch(e){renderWeatherError()}}
-function renderWeatherError(){document.getElementById('condition').textContent='Прогноз временно недоступен';document.getElementById('updated').textContent='Ошибка соединения'}
+function renderWeatherError(reason){document.getElementById('condition').textContent='Прогноз временно недоступен'+(reason?' · '+reason:'');document.getElementById('updated').textContent='Ошибка соединения'}
 function weather(){if(window.Android&&typeof Android.loadWeather==='function'){Android.loadWeather()}else{renderWeatherError()}}
 weather();
 </script></body></html>
