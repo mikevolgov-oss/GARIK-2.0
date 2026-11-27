@@ -184,11 +184,17 @@ public class MainActivity extends Activity {
         }
 
         @JavascriptInterface public void startVoiceSession() {
-            runOnUiThread(() -> beginVoiceSession());
+            runOnUiThread(() -> {
+                stopService(new Intent(MainActivity.this, WakeWordService.class));
+                beginVoiceSession();
+            });
         }
 
         @JavascriptInterface public void stopVoiceSession() {
-            runOnUiThread(() -> endVoiceSession());
+            runOnUiThread(() -> {
+                endVoiceSession();
+                startWakeWordService();
+            });
         }
 
         @JavascriptInterface public void speakText(String text) {
