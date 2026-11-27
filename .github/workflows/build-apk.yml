@@ -4,6 +4,9 @@ on:
   push:
     branches:
       - garik-wakeword-safe
+  pull_request:
+    branches:
+      - garik-wakeword-safe
   workflow_dispatch:
 
 permissions:
