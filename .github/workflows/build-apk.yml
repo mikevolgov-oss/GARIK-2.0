@@ -4,6 +4,7 @@ on:
   push:
     branches:
       - garik-wakeword-safe
+      - hcnsec-integration
   workflow_dispatch:
 
 permissions:
