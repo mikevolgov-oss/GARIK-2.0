@@ -2,6 +2,13 @@ package com.garik.os;
 
 import android.app.Activity;
 import android.os.Bundle;
+import android.os.Handler;
+import android.os.Looper;
+import android.speech.SpeechRecognizer;
+import android.speech.RecognizerIntent;
+import android.speech.RecognitionListener;
+import android.speech.tts.TextToSpeech;
+import android.speech.tts.UtteranceProgressListener;
 import android.content.Intent;
 import android.content.pm.ShortcutInfo;
 import android.content.pm.ShortcutManager;
@@ -14,6 +21,7 @@ import android.util.Log;
 import android.os.Build;
 import android.content.pm.PackageManager;
 import java.util.Locale;
+import java.util.ArrayList;
 import java.net.HttpURLConnection;
 import java.net.URL;
 import java.io.BufferedReader;
@@ -29,6 +37,11 @@ public class MainActivity extends Activity {
     private static final int REQUEST_WAKE_MIC = 7103;
     private static final int REQUEST_WAKE_NOTIFICATIONS = 7104;
     private WebView web;
+    private SpeechRecognizer voiceRecognizer;
+    private TextToSpeech textToSpeech;
+    private boolean voiceSessionActive = false;
+    private boolean voiceRequestPending = false;
+    private final Handler voiceHandler = new Handler(Looper.getMainLooper());
 
     @Override public void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
@@ -40,9 +53,10 @@ public class MainActivity extends Activity {
         web.setWebViewClient(new WebViewClient() {
             @Override public void onPageFinished(WebView view, String url) {
                 super.onPageFinished(view, url);
-                if (getIntent() != null && getIntent().getBooleanExtra("launch_chat", false)) {
-                    getIntent().removeExtra("launch_chat");
-                    view.evaluateJavascript("openAssistant()", null);
+                if (getIntent() != null && getIntent().getBooleanExtra("launch_voice", false)) {
+                    getIntent().removeExtra("launch_voice");
+                    stopService(new Intent(MainActivity.this, WakeWordService.class));
+                    view.evaluateJavascript("startGarikVoice()", null);
                 }
             }
         });
@@ -52,20 +66,16 @@ public class MainActivity extends Activity {
         web.loadUrl("file:///android_asset/index.html");
         requestHomeShortcut();
 
-        // Launch ChatGPT immediately after the notification tap.
-        // Do not wait for WebView page load and JavaScript bridge startup.
-        if (getIntent() != null && getIntent().getBooleanExtra("launch_chat", false)) {
-            getIntent().removeExtra("launch_chat");
-            launchChatGPT();
-        }
+        // Voice mode starts after WebView and the Android bridge are ready.
     }
 
     @Override protected void onNewIntent(Intent intent) {
         super.onNewIntent(intent);
         setIntent(intent);
-        if (intent.getBooleanExtra("launch_chat", false)) {
-            intent.removeExtra("launch_chat");
-            launchChatGPT();
+        if (intent.getBooleanExtra("launch_voice", false)) {
+            intent.removeExtra("launch_voice");
+            stopService(new Intent(this, WakeWordService.class));
+            if (web != null) web.post(() -> web.evaluateJavascript("startGarikVoice()", null));
         }
     }
 
@@ -173,6 +183,18 @@ public class MainActivity extends Activity {
             runOnUiThread(() -> launchChatGPT());
         }
 
+        @JavascriptInterface public void startVoiceSession() {
+            runOnUiThread(() -> beginVoiceSession());
+        }
+
+        @JavascriptInterface public void stopVoiceSession() {
+            runOnUiThread(() -> endVoiceSession());
+        }
+
+        @JavascriptInterface public void speakText(String text) {
+            runOnUiThread(() -> speakVoiceReply(text));
+        }
+
         @JavascriptInterface public void openApp(String name) {
             runOnUiThread(() -> {
                 String wanted = name == null ? "" : name.toLowerCase(new Locale("ru"));
@@ -227,6 +249,111 @@ public class MainActivity extends Activity {
         @JavascriptInterface public boolean isWakeWordActive() { return WakeWordService.isRunning(); }
     }
 
+
+
+    private void beginVoiceSession() {
+        if (!SpeechRecognizer.isRecognitionAvailable(this)) {
+            voiceStatus("Распознавание речи недоступно на этом телефоне");
+            return;
+        }
+        if (Build.VERSION.SDK_INT >= 23 && checkSelfPermission(android.Manifest.permission.RECORD_AUDIO) != PackageManager.PERMISSION_GRANTED) {
+            requestPermissions(new String[]{android.Manifest.permission.RECORD_AUDIO}, REQUEST_WAKE_MIC);
+            voiceStatus("Разреши доступ к микрофону и запусти голосовой режим ещё раз");
+            return;
+        }
+        voiceSessionActive = true;
+        if (voiceRecognizer == null) {
+            voiceRecognizer = SpeechRecognizer.createSpeechRecognizer(this);
+            voiceRecognizer.setRecognitionListener(new RecognitionListener() {
+                @Override public void onReadyForSpeech(Bundle params) { voiceStatus("Слушаю тебя…"); }
+                @Override public void onBeginningOfSpeech() { voiceStatus("Говори, брат…"); }
+                @Override public void onRmsChanged(float rmsdB) {}
+                @Override public void onBufferReceived(byte[] buffer) {}
+                @Override public void onEndOfSpeech() { voiceStatus("Обрабатываю речь…"); }
+                @Override public void onError(int error) {
+                    if (!voiceSessionActive || voiceRequestPending) return;
+                    voiceHandler.postDelayed(() -> startVoiceListening(), 900);
+                }
+                @Override public void onResults(Bundle results) {
+                    if (!voiceSessionActive) return;
+                    ArrayList<String> matches = results == null ? null : results.getStringArrayList(SpeechRecognizer.RESULTS_RECOGNITION);
+                    if (matches != null && !matches.isEmpty()) {
+                        voiceRequestPending = true;
+                        if (web != null) web.evaluateJavascript("onVoiceRecognized(" + JSONObject.quote(matches.get(0)) + ")", null);
+                    } else startVoiceListening();
+                }
+                @Override public void onPartialResults(Bundle partialResults) {}
+                @Override public void onEvent(int eventType, Bundle params) {}
+            });
+        }
+        if (textToSpeech == null) {
+            textToSpeech = new TextToSpeech(this, status -> {
+                if (status == TextToSpeech.SUCCESS) textToSpeech.setLanguage(new Locale("ru", "RU"));
+                startVoiceListening();
+            });
+        } else startVoiceListening();
+        if (web != null) web.evaluateJavascript("voiceUi(true)", null);
+    }
+
+    private void startVoiceListening() {
+        if (!voiceSessionActive || voiceRecognizer == null || voiceRequestPending) return;
+        try {
+            Intent intent = new Intent(RecognizerIntent.ACTION_RECOGNIZE_SPEECH);
+            intent.putExtra(RecognizerIntent.EXTRA_LANGUAGE_MODEL, RecognizerIntent.LANGUAGE_MODEL_FREE_FORM);
+            intent.putExtra(RecognizerIntent.EXTRA_LANGUAGE, "ru-RU");
+            intent.putExtra(RecognizerIntent.EXTRA_LANGUAGE_PREFERENCE, "ru-RU");
+            intent.putExtra(RecognizerIntent.EXTRA_MAX_RESULTS, 1);
+            voiceRecognizer.startListening(intent);
+        } catch (Exception error) {
+            voiceStatus("Не удалось включить микрофон: " + error.getMessage());
+            voiceHandler.postDelayed(() -> startVoiceListening(), 1500);
+        }
+    }
+
+    private void speakVoiceReply(String text) {
+        if (!voiceSessionActive || textToSpeech == null) { voiceRequestPending = false; return; }
+        String safe = text == null ? "" : text.trim();
+        if (safe.isEmpty()) { voiceRequestPending = false; startVoiceListening(); return; }
+        textToSpeech.setOnUtteranceProgressListener(new UtteranceProgressListener() {
+            @Override public void onStart(String id) { voiceStatus("Гарик отвечает…"); }
+            @Override public void onDone(String id) {
+                voiceRequestPending = false;
+                voiceHandler.post(() -> startVoiceListening());
+            }
+            @Override public void onError(String id) {
+                voiceRequestPending = false;
+                voiceHandler.post(() -> startVoiceListening());
+            }
+        });
+        textToSpeech.speak(safe, TextToSpeech.QUEUE_FLUSH, null, "garik_reply_" + System.currentTimeMillis());
+    }
+
+    private void voiceStatus(String message) {
+        runOnUiThread(() -> {
+            if (web != null) web.evaluateJavascript("voiceStatus(" + JSONObject.quote(message) + ")", null);
+        });
+    }
+
+    private void endVoiceSession() {
+        voiceSessionActive = false;
+        voiceRequestPending = false;
+        voiceHandler.removeCallbacksAndMessages(null);
+        if (voiceRecognizer != null) {
+            try { voiceRecognizer.cancel(); voiceRecognizer.destroy(); } catch (Exception ignored) {}
+            voiceRecognizer = null;
+        }
+        if (textToSpeech != null) {
+            try { textToSpeech.stop(); textToSpeech.shutdown(); } catch (Exception ignored) {}
+            textToSpeech = null;
+        }
+        if (web != null) web.evaluateJavascript("voiceUi(false)", null);
+    }
+
+    @Override protected void onDestroy() {
+        endVoiceSession();
+        if (web != null) { web.stopLoading(); web.destroy(); web = null; }
+        super.onDestroy();
+    }
 
     private void performApiRequest(String messagesJson) {
         HttpURLConnection connection = null;
