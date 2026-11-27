@@ -286,7 +286,7 @@ public class WakeWordService extends Service implements RecognitionListener {
                     speechService.startListening(this);
                     logState("Vosk restart startListening returned", null);
                     updateNotification(
-                        "Снова слушаю. Нажми «Открыть Гарика», чтобы перейти в голосовой ChatGPT.",
+                        "Снова слушаю фразу «Гарик, не спи».",
                         true
                     );
                 } catch (Exception e) {
@@ -309,10 +309,8 @@ public class WakeWordService extends Service implements RecognitionListener {
             if (phrase.contains("гарик не спи") || phrase.contains("гарик неспи")) {
                 triggered = true;
                 logState("WAKE_WORD_MATCH phrase=" + phrase, null);
-                getSharedPreferences("garik", MODE_PRIVATE).edit()
-                    .putBoolean("voice_pending", true).putInt("voice_attempts", 0).apply();
                 updateNotification(
-                    "Услышал! Нажми «Открыть Гарика», чтобы перейти в голосовой ChatGPT.",
+                    "Услышал! Нажми «Открыть Гарика», чтобы поговорить с Гариком через HCNSEC.",
                     true
                 );
                 scheduleRecognitionRestart(1800);
@@ -322,7 +320,7 @@ public class WakeWordService extends Service implements RecognitionListener {
 
     private Notification buildNotification(String message, boolean listening) {
         Intent open = new Intent(this, MainActivity.class);
-        open.putExtra("launch_chat", true);
+        open.putExtra("launch_voice", true);
         open.addFlags(Intent.FLAG_ACTIVITY_CLEAR_TOP | Intent.FLAG_ACTIVITY_SINGLE_TOP);
         PendingIntent content = PendingIntent.getActivity(this, 2202, open,
             PendingIntent.FLAG_UPDATE_CURRENT | (Build.VERSION.SDK_INT >= 23 ? PendingIntent.FLAG_IMMUTABLE : 0));
