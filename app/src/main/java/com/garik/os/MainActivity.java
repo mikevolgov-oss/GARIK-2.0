@@ -18,6 +18,11 @@ import java.net.HttpURLConnection;
 import java.net.URL;
 import java.io.BufferedReader;
 import java.io.InputStreamReader;
+import java.io.OutputStream;
+import java.io.InputStream;
+import java.io.ByteArrayOutputStream;
+import java.nio.charset.StandardCharsets;
+import org.json.JSONArray;
 import org.json.JSONObject;
 
 public class MainActivity extends Activity {
@@ -132,6 +137,38 @@ public class MainActivity extends Activity {
             }).start();
         }
 
+
+        @JavascriptInterface public boolean hasApiKey() {
+            return ApiKeyStore.hasKey(MainActivity.this);
+        }
+
+        @JavascriptInterface public boolean saveApiSettings(String key, String model) {
+            try {
+                String safeModel = model == null || model.trim().isEmpty() ? "auto" : model.trim();
+                if (safeModel.length() > 100) throw new IllegalArgumentException("Слишком длинное название модели.");
+                if (key != null && !key.trim().isEmpty()) {
+                    ApiKeyStore.save(MainActivity.this, key);
+                } else if (!ApiKeyStore.hasKey(MainActivity.this)) {
+                    throw new IllegalArgumentException("Сначала введи API-ключ HCNSEC.");
+                }
+                getSharedPreferences("garik_api", MODE_PRIVATE).edit()
+                    .putString("model", safeModel).apply();
+                return true;
+            } catch (Exception error) {
+                Log.e("GARIK_API", "Unable to save API settings", error);
+                return false;
+            }
+        }
+
+        @JavascriptInterface public void clearApiKey() {
+            ApiKeyStore.clear(MainActivity.this);
+            getSharedPreferences("garik_api", MODE_PRIVATE).edit().clear().apply();
+        }
+
+        @JavascriptInterface public void sendApiMessages(String messagesJson) {
+            new Thread(() -> performApiRequest(messagesJson), "GarikHcnsecRequest").start();
+        }
+
         @JavascriptInterface public void openChatGPT() {
             runOnUiThread(() -> launchChatGPT());
         }
@@ -188,6 +225,112 @@ public class MainActivity extends Activity {
             });
         }
         @JavascriptInterface public boolean isWakeWordActive() { return WakeWordService.isRunning(); }
+    }
+
+
+    private void performApiRequest(String messagesJson) {
+        HttpURLConnection connection = null;
+        try {
+            String apiKey = ApiKeyStore.read(this);
+            if (apiKey == null || apiKey.isEmpty()) {
+                throw new IllegalStateException("Сначала добавь API-ключ в настройках HCNSEC.");
+            }
+            JSONArray input = new JSONArray(messagesJson);
+            if (input.length() < 1 || input.length() > 20) {
+                throw new IllegalArgumentException("В запросе должно быть от 1 до 20 сообщений.");
+            }
+            JSONArray messages = new JSONArray();
+            for (int i = 0; i < input.length(); i++) {
+                JSONObject item = input.getJSONObject(i);
+                String role = item.optString("role", "");
+                String content = item.optString("content", "");
+                if (!"user".equals(role) && !"assistant".equals(role)) {
+                    throw new IllegalArgumentException("Недопустимый тип сообщения.");
+                }
+                if (content.trim().isEmpty() || content.length() > 6000) {
+                    throw new IllegalArgumentException("Сообщение пустое или слишком длинное.");
+                }
+                JSONObject safe = new JSONObject();
+                safe.put("role", role);
+                safe.put("content", content);
+                messages.put(safe);
+            }
+
+            String model = getSharedPreferences("garik_api", MODE_PRIVATE)
+                .getString("model", "auto");
+            JSONObject payload = new JSONObject();
+            payload.put("model", model);
+            payload.put("messages", messages);
+
+            connection = (HttpURLConnection) new URL(
+                "https://api.hcnsec.cn/v1/chat/completions").openConnection();
+            connection.setRequestMethod("POST");
+            connection.setConnectTimeout(20000);
+            connection.setReadTimeout(60000);
+            connection.setDoOutput(true);
+            connection.setRequestProperty("Authorization", "Bearer " + apiKey);
+            connection.setRequestProperty("Content-Type", "application/json; charset=utf-8");
+            connection.setRequestProperty("Accept", "application/json");
+            connection.setRequestProperty("User-Agent", "GARIK-OS/2.2");
+            byte[] body = payload.toString().getBytes(StandardCharsets.UTF_8);
+            connection.setFixedLengthStreamingMode(body.length);
+            try (OutputStream output = connection.getOutputStream()) {
+                output.write(body);
+                output.flush();
+            }
+
+            int status = connection.getResponseCode();
+            InputStream stream = status >= 200 && status < 300
+                ? connection.getInputStream() : connection.getErrorStream();
+            String response = readApiBody(stream);
+            if (status < 200 || status >= 300) {
+                String detail = response;
+                try {
+                    JSONObject error = new JSONObject(response).optJSONObject("error");
+                    if (error != null) detail = error.optString("message", response);
+                } catch (Exception ignored) {}
+                if (status == 429) {
+                    throw new IllegalStateException("HCNSEC ограничил частоту запросов (429). Подожди немного и повтори. " + detail);
+                }
+                throw new IllegalStateException("HCNSEC вернул HTTP " + status + ": " + detail);
+            }
+
+            JSONObject result = new JSONObject(response);
+            JSONArray choices = result.optJSONArray("choices");
+            if (choices == null || choices.length() == 0) {
+                throw new IllegalStateException("Сервис ответил, но не прислал текст ответа.");
+            }
+            JSONObject message = choices.getJSONObject(0).optJSONObject("message");
+            String answer = message == null ? "" : message.optString("content", "");
+            if (answer.trim().isEmpty()) throw new IllegalStateException("Модель вернула пустой ответ.");
+            deliverApiResponse(true, answer);
+        } catch (Exception error) {
+            Log.e("GARIK_API", "HCNSEC request failed: " + error.getClass().getSimpleName()
+                + ": " + String.valueOf(error.getMessage()));
+            deliverApiResponse(false, error.getMessage() == null
+                ? "Не удалось выполнить запрос к HCNSEC." : error.getMessage());
+        } finally {
+            if (connection != null) connection.disconnect();
+        }
+    }
+
+    private String readApiBody(InputStream stream) throws Exception {
+        if (stream == null) return "";
+        try (InputStream input = stream; ByteArrayOutputStream output = new ByteArrayOutputStream()) {
+            byte[] buffer = new byte[8192];
+            int count;
+            while ((count = input.read(buffer)) != -1) output.write(buffer, 0, count);
+            return output.toString("UTF-8");
+        }
+    }
+
+    private void deliverApiResponse(boolean success, String message) {
+        runOnUiThread(() -> {
+            if (web != null) {
+                web.evaluateJavascript("onApiResponse(" + success + ","
+                    + JSONObject.quote(message) + ")", null);
+            }
+        });
     }
 
     private void requestWakeNotificationPermission() {
