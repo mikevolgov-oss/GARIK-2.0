@@ -13,14 +13,15 @@
 </style></head><body>
 <header><div><div class="brand">GARIK <span>2.0</span></div><div class="sub">Личный помощник · Вичуга</div></div><div><div class="clock" id="clock">--:--</div><div class="date" id="date"></div></div></header>
 <main><section class="hello"><div class="eyebrow">Я НА СВЯЗИ</div><h1>Салам! Чем займёмся?</h1><p>Нажми кнопку, чтобы поговорить с Гариком. Я рядом, брат.</p></section>
-<button class="talk" onclick="openAssistant()"><div class="talkrow"><div class="mic">🎙️</div><div><strong>Поговорить с Гариком</strong><small>Открыть голосовой ChatGPT и начать разговор</small></div></div></button>
+<button class="talk" onclick="startGarikVoice()"><div class="talkrow"><div class="mic">🎙️</div><div><strong>Голосовой Гарик · HCNSEC</strong><small>Говори, Гарик распознает речь и ответит вслух</small></div></div></button>
 <button class="setup" onclick="toggleWakeWord()">🎧 Включить «Гарик, не спи»<small><span id="wakeStatus">Проверяю режим пробуждения…</span></small></button>
 <div class="section">ПОГОДА СЕГОДНЯ</div><section class="weather"><div class="weatherhead"><b>📍 Вичуга</b><span id="updated">Загружаю…</span></div><div class="weatherbody"><div class="temp" id="temp">--°</div><div class="condition" id="condition">Проверяю погоду</div></div><div class="forecast" id="forecast"><div class="day">Сегодня<b>--°</b></div><div class="day">Завтра<b>--°</b></div><div class="day">Послезавтра<b>--°</b></div></div></section>
 <div class="section">БЫСТРЫЙ ДОСТУП</div><div class="actions">
-<button class="action" onclick="openAssistant()"><i>🎙️</i><b>Голосовой ChatGPT</b><small>Старый голосовой режим</small></button>
+<button class="action" onclick="openAssistant()"><i>🎙️</i><b>ChatGPT</b><small>Старый голосовой режим</small></button>
 <button class="action" onclick="showApiChat()"><i>🤖</i><b>Чат HCNSEC</b><small>Новый AI через API</small></button>
 <button class="action" onclick="showApiSettings()"><i>🔐</i><b>Настройки API</b><small>Ключ хранится защищённо</small></button>
 <button class="action" onclick="panel('about')"><i>⚙️</i><b>О приложении</b><small>Возможности</small></button></div>
+<section class="panel" id="voicePanel"><h3>Голосовой Гарик · HCNSEC</h3><div class="apistatus" id="voiceStatus">Голосовой режим выключен.</div><div class="chatlog" id="voiceLog"><div class="bubble assistant">Салам! Я на связи. Нажми «Начать слушать» и говори.</div></div><div class="apirow"><button class="btn" onclick="startGarikVoice()">Начать слушать</button><button class="btn secondary" onclick="stopGarikVoice()">Завершить</button></div></section>
 <section class="panel" id="apiChat"><h3>Чат с Гариком · HCNSEC</h3><div class="apistatus" id="apiChatStatus">Проверяю подключение…</div>
 <div class="chatlog" id="chatlog"><div class="bubble assistant">Салам! Я готов отвечать через HCNSEC. Напиши, что нужно.</div></div>
 <textarea class="chatinput" id="apiPrompt" placeholder="Напиши сообщение Гарику…" maxlength="6000"></textarea>
@@ -46,8 +47,27 @@ function showApiSettings(){panel('apiSettings');let ready=false;try{ready=!!(win
 function saveApiSettings(){let key=document.getElementById('apiKeyInput').value;let model=document.getElementById('apiModelInput').value||'auto';let ok=false;try{ok=!!(window.Android&&Android.saveApiSettings&&Android.saveApiSettings(key,model))}catch(e){}document.getElementById('apiSettingsStatus').textContent=ok?'Настройки сохранены. Ключ зашифрован на телефоне.':'Не удалось сохранить. Проверь ключ и попробуй ещё раз.';if(ok){document.getElementById('apiKeyInput').value='';document.getElementById('apiChatStatus').textContent='Ключ сохранён. Можно писать Гарику.'}}
 function clearApiSettings(){try{if(window.Android&&Android.clearApiKey)Android.clearApiKey()}catch(e){}document.getElementById('apiKeyInput').value='';document.getElementById('apiSettingsStatus').textContent='Ключ удалён с телефона.';document.getElementById('apiChatStatus').textContent='Ключ не сохранён.'}
 function addBubble(text,kind){let log=document.getElementById('chatlog');let el=document.createElement('div');el.className='bubble '+kind;el.textContent=text;log.appendChild(el);log.scrollTop=log.scrollHeight;return el}
+let voiceMode=false;
+function startGarikVoice(){
+ let ready=false;try{ready=!!(window.Android&&Android.hasApiKey&&Android.hasApiKey())}catch(e){}
+ panel('voicePanel');
+ if(!ready){voiceStatus('Сначала сохрани API-ключ в настройках HCNSEC.');return}
+ if(!window.Android||!Android.startVoiceSession){voiceStatus('Голосовой модуль Android недоступен.');return}
+ voiceMode=true;voiceUi(true);Android.startVoiceSession();
+}
+function stopGarikVoice(){voiceMode=false;try{if(window.Android&&Android.stopVoiceSession)Android.stopVoiceSession()}catch(e){}voiceUi(false);voiceStatus('Голосовой разговор завершён.')}
+function voiceUi(active){let p=document.getElementById('voicePanel');if(p&&active)p.classList.add('open')}
+function voiceStatus(message){let el=document.getElementById('voiceStatus');if(el)el.textContent=message}
+function onVoiceRecognized(text){
+ if(!voiceMode)return;
+ let heard=(text||'').trim();if(!heard)return;
+ let log=document.getElementById('voiceLog');let el=document.createElement('div');el.className='bubble user';el.textContent=heard;log.appendChild(el);log.scrollTop=log.scrollHeight;
+ apiMessages.push({role:'user',content:heard});if(apiMessages.length>20)apiMessages=apiMessages.slice(-20);
+ voiceStatus('Отправляю в HCNSEC…');
+ try{Android.sendApiMessages(JSON.stringify(apiMessages))}catch(e){voiceStatus('Не удалось отправить запрос.');}
+}
 function sendApiMessage(){let field=document.getElementById('apiPrompt'),value=field.value.trim();if(!value)return;let ready=false;try{ready=!!(window.Android&&Android.hasApiKey&&Android.hasApiKey())}catch(e){}if(!ready){document.getElementById('apiChatStatus').textContent='Нет ключа. Открой «Настройки API».';return}apiMessages.push({role:'user',content:value});if(apiMessages.length>20)apiMessages=apiMessages.slice(-20);addBubble(value,'user');field.value='';let btn=document.getElementById('apiSend');btn.disabled=true;btn.textContent='Отправляю…';try{Android.sendApiMessages(JSON.stringify(apiMessages))}catch(e){onApiResponse(false,'Не удалось отправить запрос из приложения.')}}
-function onApiResponse(ok,message){let btn=document.getElementById('apiSend');btn.disabled=false;btn.textContent='Отправить';if(ok){apiMessages.push({role:'assistant',content:message});if(apiMessages.length>20)apiMessages=apiMessages.slice(-20);addBubble(message,'assistant');document.getElementById('apiChatStatus').textContent='Ответ получен через HCNSEC.'}else{addBubble(message,'error');document.getElementById('apiChatStatus').textContent='Ошибка запроса. Можно попробовать ещё раз.'}}
+function onApiResponse(ok,message){let btn=document.getElementById('apiSend');btn.disabled=false;btn.textContent='Отправить';if(ok){apiMessages.push({role:'assistant',content:message});if(apiMessages.length>20)apiMessages=apiMessages.slice(-20);if(voiceMode){let log=document.getElementById('voiceLog');let el=document.createElement('div');el.className='bubble assistant';el.textContent=message;log.appendChild(el);log.scrollTop=log.scrollHeight;voiceStatus('Гарик отвечает голосом…');if(window.Android&&Android.speakText)Android.speakText(message)}else{addBubble(message,'assistant');document.getElementById('apiChatStatus').textContent='Ответ получен через HCNSEC.'}}else{if(voiceMode){let log=document.getElementById('voiceLog');let el=document.createElement('div');el.className='bubble error';el.textContent=message;log.appendChild(el);voiceStatus('Ошибка HCNSEC. Гарик озвучит ошибку и продолжит слушать.');if(window.Android&&Android.speakText)Android.speakText(message)}else{addBubble(message,'error');document.getElementById('apiChatStatus').textContent='Ошибка запроса. Можно попробовать ещё раз.'}}}
 const wx={0:'Ясно',1:'Преимущественно ясно',2:'Переменная облачность',3:'Пасмурно',45:'Туман',51:'Морось',61:'Небольшой дождь',63:'Дождь',65:'Сильный дождь',71:'Небольшой снег',73:'Снег',75:'Сильный снег',80:'Ливневый дождь',95:'Гроза'};
 function renderWeather(raw){try{let j=JSON.parse(raw),c=j.current;document.getElementById('temp').textContent=Math.round(c.temperature_2m)+'°';document.getElementById('condition').innerHTML=(wx[c.weather_code]||'Погодные условия')+'<br>Ощущается '+Math.round(c.apparent_temperature)+'°<br>Ветер '+Math.round(c.wind_speed_10m)+' км/ч';let n=['Сегодня','Завтра','Послезавтра'];document.getElementById('forecast').innerHTML=n.map((x,i)=>'<div class="day">'+x+'<b>'+Math.round(j.daily.temperature_2m_max[i])+'° / '+Math.round(j.daily.temperature_2m_min[i])+'°</b></div>').join('');document.getElementById('updated').textContent='Обновлено сейчас'}catch(e){renderWeatherError()}}
 function renderWeatherError(reason){document.getElementById('condition').textContent='Прогноз временно недоступен'+(reason?' · '+reason:'');document.getElementById('updated').textContent='Ошибка соединения'}
