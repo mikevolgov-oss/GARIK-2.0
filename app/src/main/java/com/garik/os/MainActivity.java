@@ -240,6 +240,10 @@ public class MainActivity extends Activity {
                 throw new IllegalArgumentException("В запросе должно быть от 1 до 20 сообщений.");
             }
             JSONArray messages = new JSONArray();
+            JSONObject systemMessage = new JSONObject();
+            systemMessage.put("role", "system");
+            systemMessage.put("content", "Ты GARIK, личный помощник пользователя. Отвечай на русском, прямо, дружелюбно и разговорно. Не выдумывай факты и не утверждай, что выполнил действие, если это не подтверждено. Береги конфиденциальные данные и никогда не проси присылать API-ключи в чат.");
+            messages.put(systemMessage);
             for (int i = 0; i < input.length(); i++) {
                 JSONObject item = input.getJSONObject(i);
                 String role = item.optString("role", "");
